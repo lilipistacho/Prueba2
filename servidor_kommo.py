@@ -1,208 +1,182 @@
 from flask import Flask, request, jsonify
 import requests
-import hashlib
-import datetime
-import json
+import random
+import string
+import gzip
 import os
+import json
 
 app = Flask(__name__)
 
 # ============================================================
 #  CONFIGURACION
 # ============================================================
-PANEL_URL  = "https://admin.goldenclub.pro/index.php"
-API_TOKEN  = "2972bcc76bf82a575eaf3cab11c6c9f33e2784ddb692ee1ecd6905aac1cbeae1"
-HALL_ID    = "6875291"
-KOMMO_URL  = "https://feria4131.kommo.com"
+PANEL_URL     = "https://admin.goldenclub.pro/index.php"
+API_USER      = "eliteadmin"
+API_PASS      = "GolElite99"
+HALL_ID       = "6875291"
+GROUP_ID      = "5"
+PASS_DEFAULT  = "hola1234"
+
+KOMMO_DOMAIN  = "feria4131.kommo.com"
+KOMMO_TOKEN   = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImp0aSI6ImMwZmNmMWQ5NDEzOTZmOTU2ZTQ1ODEzZjQ1ZmQ1NjM4NGVkOTRiMjEyODg1ZDg3YmNiOGIwMzI5YjBiMjI1NzZmMGJhOGMxNzk3YmYwODU5In0.eyJhdWQiOiJkNDUyNmZmMi04MjMxLTRiMWQtYjQ2ZC03MTRmYTQwN2JiNGUiLCJqdGkiOiJjMGZjZjFkOTQxMzk2Zjk1NmU0NTgxM2Y0NWZkNTYzODRlZDk0YjIxMjg4NWQ4N2JjYjhiMDMyOWIwYjIyNTc2ZjBiYThjMTc5N2JmMDg1OSIsImlhdCI6MTc3NzI2MDEwMCwibmJmIjoxNzc3MjYwMTAwLCJleHAiOjE4MzAyMTEyMDAsInN1YiI6IjE0OTY0MDgzIiwiZ3JhbnRfdHlwZSI6IiIsImFjY291bnRfaWQiOjM2MjE0MDM1LCJiYXNlX2RvbWFpbiI6ImtvbW1vLmNvbSIsInZlcnNpb24iOjIsInNjb3BlcyI6WyJwdXNoX25vdGlmaWNhdGlvbnMiLCJmaWxlcyIsImNybSIsImZpbGVzX2RlbGV0ZSIsIm5vdGlmaWNhdGlvbnMiXSwiaGFzaF91dWlkIjoiY2E2NWRjNWYtNDVmMi00YWZjLTg2YzUtNjY0NDg3MWE1Njg0IiwiYXBpX2RvbWFpbiI6ImFwaS1jLmtvbW1vLmNvbSJ9.EkaktT8SMVuc2MnvGxg_LX1pXa9H5fg2dL2BnXorxXKKhKdnrgo3NKQgywIhJOy5CLYH9M0QERgT5Ei30zaEGY8YRjfJpIcpgNrh34Hy7-NmU1z2OTeXHsmUAlY4G-Ui_ksio3-tnF93of6ulmubU1KZ7P63R0FzLygUZiYt601L0r2gMlGgAqzUN_MRF_R4PL1kof0AhTuvjNjV2IWRRt3E3Yk8Fjp1Y60KWDS5qBpaoqLLynk6q1D3II49gi7dcUwpULxZQdP4uX9Sir1nNCcCfpgmP_MLzU47eNduiSDki7KxvFsR_mmDBkH_YcWvbc4J0t4M5xTTyhvA3EBpJg"
+
+CAMPO_USUARIO    = 2617607
+CAMPO_CONTRASENA = 2617609
 # ============================================================
 
-def calcular_mac(token, hall_id):
-    return hashlib.md5((token + hall_id).encode()).hexdigest()
+def generar_login():
+    letras  = ''.join(random.choices(string.ascii_lowercase, k=6))
+    numeros = ''.join(random.choices(string.digits, k=4))
+    return letras + numeros
 
-def calcular_terminal(login, password):
-    return hashlib.md5((login + password).encode()).hexdigest()
+def decode_response(resp):
+    content = resp.content
+    try:
+        content = gzip.decompress(content)
+    except:
+        pass
+    try:
+        return content.decode('utf-8')
+    except:
+        return content.decode('latin-1', errors='replace')
 
-def calcular_key(hall_id, login):
-    now = datetime.datetime.now().strftime("%Y%m%d%H%M%S") + "DEC"
-    return f"{hall_id}_{login}_{now}"
-
-# ================================================================
-#  FUNCIONES DE LA API DEL PANEL
-# ================================================================
+def get_session():
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept-Language": "es-US,es;q=0.9",
+        "Origin": "https://admin.goldenclub.pro",
+    })
+    login_headers = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": "https://admin.goldenclub.pro/index.php?act=admin&area=login",
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "same-origin",
+    }
+    payload = {"login": API_USER, "password": API_PASS}
+    params  = {"act": "admin", "area": "login"}
+    resp = session.post(PANEL_URL, params=params, data=payload,
+                        headers=login_headers, timeout=10, allow_redirects=True)
+    print(f"[login] Status: {resp.status_code} | Cookies: {dict(session.cookies)}")
+    return session
 
 def crear_usuario():
-    """Crea un usuario tipo terminal con PIN automatico"""
-    mac = calcular_mac(API_TOKEN, HALL_ID)
-    payload = {
-        "cmd": "terminalCreate",
-        "hall_id": HALL_ID,
-        "mac": mac,
-        "terminal": "OK"
-    }
     try:
-        resp = requests.post(
-            f"{PANEL_URL}?act=admin&area=cmd&response=js&token={API_TOKEN}",
-            json=payload,
-            timeout=10
-        )
-        data = resp.json()
-        print(f"[crear_usuario] Respuesta: {data}")
-        if data.get("status") == "success":
-            return {
-                "ok": True,
-                "login": data["content"]["login"],
-                "password": data["content"]["password"],
-                "id": data["content"]["id"]
-            }
-        else:
-            return {"ok": False, "error": data.get("error", "Error desconocido")}
-    except Exception as e:
-        print(f"[crear_usuario] Error: {e}")
-        return {"ok": False, "error": str(e)}
+        login   = generar_login()
+        session = get_session()
+        ajax_headers = {
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Encoding": "identity",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Referer": "https://admin.goldenclub.pro/index.php",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+        }
+        payload = {
+            "group":    GROUP_ID,
+            "sended":   "true",
+            "login":    login,
+            "password": PASS_DEFAULT,
+            "balance":  ""
+        }
+        params = {
+            "act":  "admin",
+            "area": "createuser",
+            "id":   HALL_ID
+        }
+        resp = session.post(PANEL_URL, params=params, data=payload,
+                            headers=ajax_headers, timeout=15)
+        text = decode_response(resp)
+        print(f"[crear_usuario] Respuesta: {text[:300]}")
 
-def depositar_usuario(login, password, monto):
-    """Deposita saldo a un usuario"""
-    mac  = calcular_mac(API_TOKEN, HALL_ID)
-    term = calcular_terminal(login, password)
-    key  = calcular_key(HALL_ID, login)
-    payload = {
-        "cmd": "terminalCash",
-        "operation": "in",
-        "cash": str(monto),
-        "hall_id": HALL_ID,
-        "mac": mac,
-        "key": key,
-        "terminal": term
-    }
-    try:
-        resp = requests.post(
-            f"{PANEL_URL}?act=admin&area=cmd&response=js&token={API_TOKEN}",
-            json=payload,
-            timeout=10
-        )
-        data = resp.json()
-        print(f"[depositar_usuario] Respuesta: {data}")
-        if data.get("status") == "success":
-            return {
-                "ok": True,
-                "saldo": data["content"]["cash"],
-                "operacion_id": data["content"]["operationId"]
-            }
-        else:
-            return {"ok": False, "error": data.get("error", "Error desconocido")}
-    except Exception as e:
-        print(f"[depositar_usuario] Error: {e}")
-        return {"ok": False, "error": str(e)}
+        if "xito" in text or "Exito" in text:
+            return {"ok": True, "login": login, "password": PASS_DEFAULT}
 
-def info_usuario(login, password):
-    """Obtiene info de un usuario"""
-    mac  = calcular_mac(API_TOKEN, HALL_ID)
-    term = calcular_terminal(login, password)
-    payload = {
-        "cmd": "terminalInfo",
-        "hall_id": HALL_ID,
-        "mac": mac,
-        "terminal": term
-    }
-    try:
-        resp = requests.post(
-            f"{PANEL_URL}?act=admin&area=cmd&response=js&token={API_TOKEN}",
-            json=payload,
-            timeout=10
-        )
-        data = resp.json()
-        if data.get("status") == "success":
-            return {"ok": True, "data": data["content"]}
-        else:
-            return {"ok": False, "error": data.get("error")}
+        try:
+            data = json.loads(text)
+            error_msg = data.get("errorMessage") or data.get("error") or ""
+            if data.get("status") == "success":
+                return {"ok": True, "login": login, "password": PASS_DEFAULT}
+            elif "existe" in str(error_msg).lower() or "busy" in str(error_msg).lower():
+                return crear_usuario()
+            else:
+                return {"ok": False, "error": str(error_msg) or "Error desconocido"}
+        except:
+            return {"ok": False, "error": f"Respuesta inesperada: {text[:100]}"}
+
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-# ================================================================
-#  WEBHOOK — recibe eventos de Kommo
-# ================================================================
+
+def guardar_credenciales_en_lead(lead_id, login, password):
+    """Guarda las credenciales en los campos personalizados del lead en Kommo"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {KOMMO_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        url = f"https://{KOMMO_DOMAIN}/api/v4/leads"
+        payload = [{
+            "id": int(lead_id),
+            "custom_fields_values": [
+                {"field_id": CAMPO_USUARIO,    "values": [{"value": login}]},
+                {"field_id": CAMPO_CONTRASENA, "values": [{"value": password}]}
+            ]
+        }]
+        resp = requests.patch(url, headers=headers, json=payload, timeout=10)
+        print(f"[campos] Status: {resp.status_code} | Resp: {resp.text[:200]}")
+        return resp.status_code in [200, 201]
+    except Exception as e:
+        print(f"[campos] Error: {e}")
+        return False
+
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """
-    Kommo manda los datos del lead cuando el bot termina de recopilarlos.
-    El payload esperado es:
-    {
-        "accion": "crear_usuario" | "carga",
-        "lead_id": "123456",
-        "nombre": "Juan",
-        "monto": "5000"       (solo para carga)
-    }
-    """
     try:
-        data = request.get_json(force=True)
-        print(f"[webhook] Recibido: {data}")
+        raw = request.get_data(as_text=True)
+        print(f"[webhook] RAW: {raw[:500]}")
 
-        accion   = data.get("accion", "")
-        lead_id  = data.get("lead_id", "")
-        nombre   = data.get("nombre", "Usuario")
-        monto    = data.get("monto", "0")
+        form_data = request.form
+        lead_id = (form_data.get("leads[add][0][id]") or
+                   form_data.get("leads[update][0][id]") or
+                   form_data.get("leads[status][0][id]"))
 
-        if accion == "crear_usuario":
-            resultado = crear_usuario()
-            if resultado["ok"]:
-                mensaje = (
-                    f"✅ ¡Tu cuenta fue creada exitosamente!\n\n"
-                    f"👤 *Usuario:* `{resultado['login']}`\n"
-                    f"🔐 *Contraseña:* `{resultado['password']}`\n\n"
-                    f"Ingresá con estos datos en la plataforma. "
-                    f"¡Mucha suerte! 🎰"
-                )
-                enviar_mensaje_kommo(lead_id, mensaje)
-                return jsonify({"status": "ok", "login": resultado["login"]})
-            else:
-                enviar_mensaje_kommo(lead_id,
-                    "❌ Hubo un error al crear tu cuenta. Un asesor te va a contactar en breve.")
-                return jsonify({"status": "error", "detalle": resultado["error"]})
+        print(f"[webhook] Lead ID: {lead_id}")
 
-        elif accion == "carga":
-            # Para carga, derivar a humano con los datos recopilados
-            mensaje_interno = (
-                f"💰 *Solicitud de carga*\n"
-                f"Nombre: {nombre}\n"
-                f"Monto solicitado: ${monto}\n"
-                f"⚠️ Requiere aprobación manual."
-            )
-            enviar_nota_interna_kommo(lead_id, mensaje_interno)
-            enviar_mensaje_kommo(lead_id,
-                "✅ Recibimos tu solicitud de carga. Un asesor la va a confirmar en breve.")
-            return jsonify({"status": "ok"})
+        resultado = crear_usuario()
 
+        if resultado["ok"]:
+            login    = resultado["login"]
+            password = resultado["password"]
+            print(f"[webhook] Usuario creado: {login}")
+
+            if lead_id:
+                guardar_credenciales_en_lead(lead_id, login, password)
+
+            return jsonify({"status": "ok", "login": login, "password": password})
         else:
-            return jsonify({"status": "error", "detalle": "Accion desconocida"})
+            print(f"[webhook] Error: {resultado['error']}")
+            return jsonify({"status": "error", "detalle": resultado["error"]})
 
     except Exception as e:
         print(f"[webhook] Error general: {e}")
         return jsonify({"status": "error", "detalle": str(e)}), 500
 
 
-def enviar_mensaje_kommo(lead_id, texto):
-    """Envia un mensaje al lead en Kommo via API"""
-    # TODO: completar con el token de Kommo cuando este disponible
-    print(f"[Kommo] Mensaje para lead {lead_id}: {texto}")
-
-def enviar_nota_interna_kommo(lead_id, texto):
-    """Agrega una nota interna en el lead de Kommo"""
-    print(f"[Kommo] Nota interna para lead {lead_id}: {texto}")
+@app.route('/test_crear_usuario', methods=['GET'])
+def test_crear():
+    resultado = crear_usuario()
+    return jsonify(resultado)
 
 
-# ================================================================
-#  HEALTH CHECK
-# ================================================================
 @app.route('/', methods=['GET'])
 def health():
     return jsonify({"status": "ok", "mensaje": "Servidor Casino activo"})
-
-@app.route('/test_crear_usuario', methods=['GET'])
-def test_crear():
-    """Endpoint de prueba para verificar que la API del panel funciona"""
-    resultado = crear_usuario()
-    return jsonify(resultado)
 
 
 if __name__ == '__main__':
